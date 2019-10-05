@@ -80,13 +80,12 @@ class DealGifFace:
 
 
 class DealGif:
-    def __init__(self, bgr, text, duration, fps, max_width=500):
+    def __init__(self, bgr, text, duration, fps, suffix='.gif', max_width=500):
         self.bgrpath = Path(bgr)
-        self.gifpath = self.bgrpath.with_name('%s-deal'
-                % (self.bgrpath.stem)).with_suffix('.gif')
         self.bgr = Image.open(self.bgrpath.as_posix()).convert('RGBA')
         self.duration = duration
         self.fps = fps
+        self.suffix = suffix
 
         # scale if needed
         if max_width > 0 and self.bgr.size[0] > max_width:
@@ -106,6 +105,13 @@ class DealGif:
                 fontsize=50, fontweight='bold',
                 xy=(self.bgr.size[0] // 2, int(self.bgr.size[1] * 0.9)),
                 fill=(1, 1, 1), stroke=(0, 0, 0), stroke_width=2)
+
+        self.animation = None
+
+    @property
+    def outpath(self):
+        return self.bgrpath.with_name('%s-deal'
+                % (self.bgrpath.stem)).with_suffix(self.suffix)
 
     def make_faces(self):
         self.faces = [DealGifFace(self, r) for r in detector(self.bgr_gray, 0)]
@@ -140,6 +146,17 @@ class DealGif:
                 gzs_image.close()
 
         return np.asarray(frame)
+
+    def make_animation(self):
+        self.animation = mpy.VideoClip(self.make_frame, duration=self.duration)
+
+    def write(self, outpath=None):
+        outpath = self.outpath.as_posix() if outpath is None else outpath
+        if self.suffix == '.gif':
+            self.animation.write_gif(outpath, fps=args.fps)
+        else:
+            self.animation.write_videofile(outpath, fps=25, codec='libx264',
+                    preset='slow', verbose=True, remove_temp=False, write_logfile=True)
 
 
 if __name__ == '__main__':
@@ -177,7 +194,9 @@ if __name__ == '__main__':
         logging.info("processing %s -- %d face(s) found",
                 deal_gif.bgrpath, len(deal_gif.faces))
 
-        animation = mpy.VideoClip(deal_gif.make_frame, duration=args.duration)
-        animation.write_gif(deal_gif.gifpath, fps=args.fps)
+        deal_gif.make_animation()
+        deal_gif.write()
+        deal_gif.suffix = '.mp4'
+        deal_gif.write()
 
 # vim: expandtab:ts=4:sts=4:sw=4:
