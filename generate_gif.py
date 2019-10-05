@@ -80,12 +80,15 @@ class DealGifFace:
 
 
 class DealGif:
-    def __init__(self, bgr, text, duration, fps, suffix='.gif', max_width=500):
+    TEXT_DT = 1
+    def __init__(self, bgr, duration, fps, max_width=500, suffix='.gif',
+            text_top=None, text_bottom=None, font_size=50):
         self.bgrpath = Path(bgr)
         self.bgr = Image.open(self.bgrpath.as_posix()).convert('RGBA')
         self.duration = duration
         self.fps = fps
         self.suffix = suffix
+        self.font_size = font_size
 
         # scale if needed
         if max_width > 0 and self.bgr.size[0] > max_width:
@@ -96,22 +99,35 @@ class DealGif:
         # convert to gray for dlib face detector
         self.bgr_gray = np.array(self.bgr.convert('L'))
 
-        # initialize faces array
+        # render text
+        self.text_top = text_top
+        self.text_bottom = text_bottom
+        self.gztext = []
+        if self.text_top is not None:
+            self.gztext.append(self.make_text(self.text_top, 'top'))
+        if self.text_bottom is not None:
+            self.gztext.append(self.make_text(self.text_bottom, 'bottom'))
+
+        # uninitialized members
         self.faces = []
-
         self.swag = None
-        self.text = text
-        self.gztext = gz.text(self.text, fontfamily='Impact',
-                fontsize=50, fontweight='bold',
-                xy=(self.bgr.size[0] // 2, int(self.bgr.size[1] * 0.9)),
-                fill=(1, 1, 1), stroke=(0, 0, 0), stroke_width=2)
-
         self.animation = None
 
     @property
     def outpath(self):
         return self.bgrpath.with_name('%s-deal'
                 % (self.bgrpath.stem)).with_suffix(self.suffix)
+
+    def make_text(self, text, where='bottom'):
+        if text is None:
+            return None
+        if where == 'top':
+            xy=(self.bgr.size[0] // 2, int(self.bgr.size[1] * 0.1))
+        else:
+            xy=(self.bgr.size[0] // 2, int(self.bgr.size[1] * 0.9))
+        return gz.text(text, xy=xy,
+                fontfamily='Impact', fontsize=self.font_size, fontweight='bold',
+                fill=(1, 1, 1), stroke=(0, 0, 0), stroke_width=2)
 
     def make_faces(self):
         self.faces = [DealGifFace(self, r) for r in detector(self.bgr_gray, 0)]
@@ -126,7 +142,7 @@ class DealGif:
         frame = self.bgr.convert('RGB')
 
         t_swag_start = 0.10 * self.duration
-        t_swag_end = 0.75 * self.duration
+        t_swag_end = self.duration
 
         if t <= t_swag_start:
             # no swag for starting frames
@@ -138,20 +154,33 @@ class DealGif:
                 current_y = int(face.swag_pos[1] * (t - t_swag_start) / (t_swag_end - t_swag_start))
                 frame.paste(face.swag, (current_x, current_y), face.swag)
         else:
-            # stable swag + text
+            # stable swag
             for face in self.faces:
                 frame.paste(face.swag, face.swag_pos, face.swag)
 
-                gzs = gz.Surface(*self.bgr.size, bg_color=None)
-                self.gztext.draw(gzs)
-                gzs_image = Image.fromarray(gzs.get_npimage(transparent=True))
-                frame.paste(gzs_image, (0, 0), gzs_image)
-                gzs_image.close()
+            # draw text
+            if len(self.gztext) > 0:
+                for gzt in self.gztext[0:self.gztext_i+1]:
+                    gzs = gz.Surface(*self.bgr.size, bg_color=None)
+                    gzt.draw(gzs)
+                    gzs_image = Image.fromarray(gzs.get_npimage(transparent=True))
+                    frame.paste(gzs_image, (0, 0), gzs_image)
+                    gzs_image.close()
+
+                if t > t_swag_end + (self.gztext_i + 1)*DealGif.TEXT_DT:
+                    self.gztext_i += 1
 
         return np.asarray(frame)
 
     def make_animation(self):
-        self.animation = mpy.VideoClip(self.make_frame, duration=self.duration)
+        # increase duration to show ending text or pause to final frame
+        duration = self.duration
+        if len(self.gztext) > 0:
+            duration += DealGif.TEXT_DT*len(self.gztext) + 1
+        else:
+            duration += 2
+        self.gztext_i = 0
+        self.animation = mpy.VideoClip(self.make_frame, duration=duration)
 
     def write(self, outpath=None):
         outpath = self.outpath.as_posix() if outpath is None else outpath
@@ -168,14 +197,18 @@ if __name__ == '__main__':
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--swag-img", default="deals.png",
             help="deal-with-it swag image")
-    parser.add_argument("--text", default="DEAL WITH IT",
-            help="set an alternative deal-with-it text")
+    parser.add_argument("--text-bottom", default="DEAL WITH IT",
+            help="set bottom text")
+    parser.add_argument("--text-top", default=None,
+            help="set optional top text")
     parser.add_argument("--max-width", type=int, default=500,
             help="maximum width for output -- keep gif size small")
     parser.add_argument("--duration", type=int, default=4,
             help="duration for the output file")
     parser.add_argument("--fps", type=int, default=4,
             help="fps for the output file")
+    parser.add_argument("--font-pt", type=int, default=50,
+            help="font size for text")
     parser.add_argument("--suffix", default='.gif',
             help="set the output file type")
     args, uargs = parser.parse_known_args()
@@ -184,7 +217,8 @@ if __name__ == '__main__':
 
     for ua in uargs:
         try:
-            deal_gif = DealGif(ua, args.text, max_width=args.max_width,
+            deal_gif = DealGif(ua, max_width=args.max_width, font_size=args.font_pt,
+                    text_top = args.text_top, text_bottom = args.text_bottom,
                     duration=args.duration, fps=args.fps, suffix=args.suffix)
             deal_gif.swag = swag_img
             deal_gif.make_faces()
