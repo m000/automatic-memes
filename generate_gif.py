@@ -79,12 +79,13 @@ class DealGifFace:
 
 
 class DealGif:
-    def __init__(self, im, duration, max_width=500):
+    def __init__(self, im, duration, fps, max_width=500):
         self.imgpath = Path(im)
         self.gifpath = self.imgpath.with_name('%s-deal'
                 % (self.imgpath.stem)).with_suffix('.gif')
         self.img = Image.open(self.imgpath.as_posix()).convert('RGBA')
         self.duration = duration
+        self.fps = fps
 
         # scale if needed
         if max_width > 0 and self.img.size[0] > max_width:
@@ -109,20 +110,27 @@ class DealGif:
     def make_frame(self, t):
         img = self.img.convert('RGBA')
 
-        # no swag for first frame
-        if t == 0:
-            return np.asarray(img)
+        t_swag_start = 0.10 * self.duration
+        t_swag_end = 0.75 * self.duration
 
-        # draw swag
-        for face in self.faces:
-            if t <= self.duration - 2:
+        if t <= t_swag_start:
+            # no swag for starting frames
+            pass
+        elif t <= t_swag_end:
+            # moving swag
+            for face in self.faces:
                 current_x = face.swag_pos[0]
-                current_y = int(face.swag_pos[1] * t / (self.duration - 2))
-
+                #current_y = int(face.swag_pos[1] * n / (self.duration - 2))
+                current_y = int(face.swag_pos[1] * (t - t_swag_start) / (t_swag_end - t_swag_start))
+                #logging.info((t, current_x, current_y))
                 img.paste(face.swag, (current_x, current_y), face.swag)
-            else:
+        else:
+            # stable swag + text
+            for face in self.faces:
                 img.paste(face.swag, face.swag_pos, face.swag)
-                img.paste(self.text, (75, img.height // 2 - 32), self.text)
+                text_x = (img.width - self.text.width) // 2
+                text_y = img.height - int(self.text.height * 1.1)
+                img.paste(self.text, (text_x, text_y), self.text)
 
         return np.asarray(img)
 
@@ -137,7 +145,9 @@ if __name__ == '__main__':
     parser.add_argument("--max-width", type=int, default=500,
             help="maximum width for output -- keep gif size small")
     parser.add_argument("--duration", type=int, default=4,
-            help="duration in seconds for the gif animation")
+            help="duration for the output file")
+    parser.add_argument("--fps", type=int, default=4,
+            help="fps for the output file")
     args, uargs = parser.parse_known_args()
 
     swag_img = Image.open(args.swag_img)
@@ -145,7 +155,7 @@ if __name__ == '__main__':
 
     for ua in uargs:
         try:
-            deal_gif = DealGif(ua, args.duration, max_width=args.max_width)
+            deal_gif = DealGif(ua, args.duration, args.fps, max_width=args.max_width)
             deal_gif.swag = swag_img
             deal_gif.text = text_img
             deal_gif.make_faces()
@@ -163,6 +173,6 @@ if __name__ == '__main__':
                 deal_gif.imgpath, len(deal_gif.faces))
 
         animation = mpy.VideoClip(deal_gif.make_frame, duration=args.duration)
-        animation.write_gif(deal_gif.gifpath, fps=4)
+        animation.write_gif(deal_gif.gifpath, fps=args.fps)
 
 # vim: expandtab:ts=4:sts=4:sw=4:
