@@ -1,101 +1,168 @@
-import dlib
-from PIL import Image
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import argparse
+import dlib
+import logging
+import moviepy.editor as mpy
+import numpy as np
+import shlex
+import sys
 
 from imutils import face_utils
-import numpy as np
+from pathlib import Path
+from PIL import Image
 
-import moviepy.editor as mpy
-
-parser = argparse.ArgumentParser()
-parser.add_argument("-image", required=True, help="path to input image")
-args = parser.parse_args()
+logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
 
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor('shape_predictor_68.dat')
 
-# resize to a max_width to keep gif size small
-max_width = 500
+class NoFacesDetectedError(Exception):
+    pass
 
-# open our image, convert to rgba
-img = Image.open(args.image).convert('RGBA')
+class DealGifFace:
+    def __init__(self, dealgif, rect):
+        self.dealgif = dealgif
+        self.rect = rect
+        logging.debug("face-rect: %s" % ((self.top_left, self.bottom_right),))
 
-# two images we'll need, glasses and deal with it text
-deal = Image.open("deals.png")
-text = Image.open('text.png')
+        # extract facial features
+        # see: https://www.pyimagesearch.com/2017/04/03/facial-landmarks-dlib-opencv-python/
+        self.features = face_utils.shape_to_np(
+                predictor(self.dealgif.img_gray, self.rect))
 
-if img.size[0] > max_width:
-    scaled_height = int(max_width * img.size[1] / img.size[0])
-    img.thumbnail((max_width, scaled_height))
+        # initialize swag
+        self.set_swag()
 
-img_gray = np.array(img.convert('L')) # need grayscale for dlib face detection
+    def set_swag(self, swagimg=None):
+        """ Rotate swag image and fit it to eyes centers.
+        """
+        if swagimg is None:
+            swagimg = self.dealgif.swag
+        if getattr(self, 'swag', None) is not None:
+            self.swag.close()
 
-rects = detector(img_gray, 0)
+        # scale swag to fit the face
+        sw = self.width
+        sh = (self.width * swagimg.size[1]) // swagimg.size[0]
+        self.swag = swagimg.resize((sw, sh), resample=Image.LANCZOS)
+        self.swag.rotate(self.eyes_angle(), expand=True)
+        self.swag.transpose(Image.FLIP_TOP_BOTTOM)
 
-if len(rects) == 0:
-    print("No faces found, exiting.")
-    exit()
+        # shift swag the leftmost position of the left eye
+        left_eye_x = self.left_eye[0,0] - self.width // 4
+        left_eye_y = self.left_eye[0,1] - self.width // 6
+        self.swag_pos = (left_eye_x, left_eye_y)
 
-print("%i faces found in source image. processing into gif now." % len(rects))
+    def eyes_angle(self):
+        left_eye_c = self.right_eye.mean(axis=0).astype('int')
+        right_eye_c = self.left_eye.mean(axis=0).astype('int')
+        dy = left_eye_c[1] - right_eye_c[1]
+        dx = left_eye_c[0] - right_eye_c[0]
+        return np.rad2deg(np.arctan2(dy, dx))
 
-faces = []
+    @property
+    def left_eye(self):
+        return self.features[36:42]
+    @property
+    def right_eye(self):
+        return self.features[42:48]
+    @property
+    def width(self):
+        return self.rect.right() - self.rect.left()
+    @property
+    def top_left(self):
+        return (self.rect.top(), self.rect.left())
+    @property
+    def bottom_right(self):
+        return (self.rect.bottom(), self.rect.right())
 
-for rect in rects:
-    face = {}
-    print(rect.top(), rect.right(), rect.bottom(), rect.left())
-    shades_width = rect.right() - rect.left()
 
-    # predictor used to detect orientation in place where current face is
-    shape = predictor(img_gray, rect)
-    shape = face_utils.shape_to_np(shape)
+class DealGif:
+    def __init__(self, im, duration, max_width=500):
+        self.imgpath = Path(im)
+        self.gifpath = self.imgpath.with_name('%s-deal'
+                % (self.imgpath.stem)).with_suffix('.gif')
+        self.img = Image.open(self.imgpath.as_posix()).convert('RGBA')
+        self.duration = duration
 
-    # grab the outlines of each eye from the input image
-    leftEye = shape[36:42]
-    rightEye = shape[42:48]
+        # scale if needed
+        if max_width > 0 and self.img.size[0] > max_width:
+            thumbw = max_width
+            thumbh = (thumbw * self.img.size[1]) // self.img.size[0]
+            self.img.thumbnail((thumbw, thumbh), Image.ANTIALIAS)
 
-    # compute the center of mass for each eye
-    leftEyeCenter = leftEye.mean(axis=0).astype("int")
-    rightEyeCenter = rightEye.mean(axis=0).astype("int")
+        # convert to gray for dlib face detector
+        self.img_gray = np.array(self.img.convert('L'))
 
-	# compute the angle between the eye centroids
-    dY = leftEyeCenter[1] - rightEyeCenter[1] 
-    dX = leftEyeCenter[0] - rightEyeCenter[0]
-    angle = np.rad2deg(np.arctan2(dY, dX)) 
+        # initialize faces array
+        self.faces = []
 
-    # resize glasses to fit face width
-    current_deal = deal.resize((shades_width, int(shades_width * deal.size[1] / deal.size[0])),
-                               resample=Image.LANCZOS)
-    # rotate and flip to fit eye centers
-    current_deal = current_deal.rotate(angle, expand=True)
-    current_deal = current_deal.transpose(Image.FLIP_TOP_BOTTOM)
+        self.swag = None
+        self.text = None
 
-    # add the scaled image to a list, shift the final position to the
-    # left of the leftmost eye
-    face['glasses_image'] = current_deal
-    left_eye_x = leftEye[0,0] - shades_width // 4
-    left_eye_y = leftEye[0,1] - shades_width // 6
-    face['final_pos'] = (left_eye_x, left_eye_y)
-    faces.append(face)
+    def make_faces(self):
+        self.faces = [DealGifFace(self, r) for r in detector(self.img_gray, 0)]
+        if not self.faces:
+            raise NoFacesDetectedError(self.imgpath)
 
-# how long our gif should be
-duration = 4
+    def make_frame(self, t):
+        img = self.img.convert('RGBA')
 
-def make_frame(t):
-    draw_img = img.convert('RGBA') # returns copy of original image
+        # no swag for first frame
+        if t == 0:
+            return np.asarray(img)
 
-    if t == 0: # no glasses first image
-        return np.asarray(draw_img)
+        # draw swag
+        for face in self.faces:
+            if t <= self.duration - 2:
+                current_x = face.swag_pos[0]
+                current_y = int(face.swag_pos[1] * t / (self.duration - 2))
 
-    for face in faces:
-        if t <= duration - 2:
-            current_x = int(face['final_pos'][0])
-            current_y = int(face['final_pos'][1] * t / (duration - 2))
-            draw_img.paste(face['glasses_image'], (current_x, current_y) , face['glasses_image'])
-        else:
-            draw_img.paste(face['glasses_image'], face['final_pos'], face['glasses_image'])
-            draw_img.paste(text, (75, draw_img.height // 2 - 32), text)
+                img.paste(face.swag, (current_x, current_y), face.swag)
+            else:
+                img.paste(face.swag, face.swag_pos, face.swag)
+                img.paste(self.text, (75, img.height // 2 - 32), self.text)
 
-    return np.asarray(draw_img)
+        return np.asarray(img)
 
-animation = mpy.VideoClip(make_frame, duration=duration)
-animation.write_gif("deal.gif", fps=4)
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="automatic deal-with-it generator",
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument("--swag-img", default="deals.png",
+            help="deal-with-it swag image")
+    parser.add_argument("--text-img", default="text.png",
+            help="deal-with-it text image")
+    parser.add_argument("--max-width", type=int, default=500,
+            help="maximum width for output -- keep gif size small")
+    parser.add_argument("--duration", type=int, default=4,
+            help="duration in seconds for the gif animation")
+    args, uargs = parser.parse_known_args()
+
+    swag_img = Image.open(args.swag_img)
+    text_img = Image.open(args.text_img)
+
+    for ua in uargs:
+        try:
+            deal_gif = DealGif(ua, args.duration, max_width=args.max_width)
+            deal_gif.swag = swag_img
+            deal_gif.text = text_img
+            deal_gif.make_faces()
+        except FileNotFoundError:
+            logging.warning("skipping %s -- not a file", ua)
+            continue
+        except OSError:
+            logging.warning("skipping %s -- not an image", ua)
+            continue
+        except NoFacesDetectedError:
+            logging.warning("skipping %s -- no faces detected", ua)
+            continue
+
+        logging.info("processing %s -- %d face(s) found",
+                deal_gif.imgpath, len(deal_gif.faces))
+
+        animation = mpy.VideoClip(deal_gif.make_frame, duration=args.duration)
+        animation.write_gif(deal_gif.gifpath, fps=4)
+
+# vim: expandtab:ts=4:sts=4:sw=4:
