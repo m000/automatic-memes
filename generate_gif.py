@@ -161,8 +161,7 @@ class DealGif:
         else:
             # video_debug = {'verbose': True, 'remove_temp': False, 'write_logfile': True}
             video_debug = {}
-            self.animation.write_videofile(outpath, fps=24,
-                    codec='libx264', preset='slow', **video_debug)
+            self.animation.write_videofile(outpath, fps=24, preset='slow', **video_debug)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="automatic deal-with-it generator",
@@ -177,13 +176,16 @@ if __name__ == '__main__':
             help="duration for the output file")
     parser.add_argument("--fps", type=int, default=4,
             help="fps for the output file")
+    parser.add_argument("--suffix", default='.gif',
+            help="set the output file type")
     args, uargs = parser.parse_known_args()
 
     swag_img = Image.open(args.swag_img)
 
     for ua in uargs:
         try:
-            deal_gif = DealGif(ua, args.text, args.duration, args.fps, max_width=args.max_width)
+            deal_gif = DealGif(ua, args.text, max_width=args.max_width,
+                    duration=args.duration, fps=args.fps, suffix=args.suffix)
             deal_gif.swag = swag_img
             deal_gif.make_faces()
         except FileNotFoundError:
@@ -198,10 +200,7 @@ if __name__ == '__main__':
 
         logging.info("processing %s -- %d face(s) found",
                 deal_gif.bgrpath, len(deal_gif.faces))
-
         deal_gif.make_animation()
-        deal_gif.write()
-        deal_gif.suffix = '.mp4'
         deal_gif.write()
 
 # vim: expandtab:ts=4:sts=4:sw=4:
