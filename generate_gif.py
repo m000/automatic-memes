@@ -119,7 +119,11 @@ class DealGif:
             raise NoFacesDetectedError(self.bgrpath)
 
     def make_frame(self, t):
-        frame = self.bgr.convert('RGBA')
+        # Make an RGB copy of the background image to work with.
+        # make_frame() is expected to return RGB images. RGBA works
+        # ok for gif output, but results in garbled video output.
+        # https://zulko.github.io/moviepy/ref/VideoClip/VideoClip.html#moviepy.video.VideoClip.VideoClip
+        frame = self.bgr.convert('RGB')
 
         t_swag_start = 0.10 * self.duration
         t_swag_end = 0.75 * self.duration
@@ -132,7 +136,6 @@ class DealGif:
             for face in self.faces:
                 current_x = face.swag_pos[0]
                 current_y = int(face.swag_pos[1] * (t - t_swag_start) / (t_swag_end - t_swag_start))
-                #logging.info((t, current_x, current_y))
                 frame.paste(face.swag, (current_x, current_y), face.swag)
         else:
             # stable swag + text
@@ -152,12 +155,14 @@ class DealGif:
 
     def write(self, outpath=None):
         outpath = self.outpath.as_posix() if outpath is None else outpath
+        self.animation.set_duration(self.duration)
         if self.suffix == '.gif':
-            self.animation.write_gif(outpath, fps=args.fps)
+            self.animation.write_gif(outpath, colors=256, fps=args.fps)
         else:
-            self.animation.write_videofile(outpath, fps=25, codec='libx264',
-                    preset='slow', verbose=True, remove_temp=False, write_logfile=True)
-
+            # video_debug = {'verbose': True, 'remove_temp': False, 'write_logfile': True}
+            video_debug = {}
+            self.animation.write_videofile(outpath, fps=24,
+                    codec='libx264', preset='slow', **video_debug)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="automatic deal-with-it generator",
