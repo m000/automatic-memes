@@ -47,12 +47,12 @@ class DealGifFace:
         sw = self.width
         sh = (self.width * swagimg.size[1]) // swagimg.size[0]
         self.swag = swagimg.resize((sw, sh), resample=Image.LANCZOS)
-        self.swag.rotate(self.eyes_angle(), expand=True)
-        self.swag.transpose(Image.FLIP_TOP_BOTTOM)
+        self.swag=self.swag.transpose(Image.FLIP_LEFT_RIGHT)
+        #self.swag=self.swag.rotate(self.eyes_angle(), expand=True)
 
-        # shift swag the leftmost position of the left eye
-        left_eye_x = self.left_eye[0,0] - self.width // 4
-        left_eye_y = self.left_eye[0,1] - self.width // 6
+        # shift swag to the leftmost position of the left eye
+        left_eye_x = self.left_eye[0,0] - int(self.width / 4.5)
+        left_eye_y = self.left_eye[0,1] - int(self.width / 7.5)
         self.swag_pos = (left_eye_x, left_eye_y)
 
     def eyes_angle(self):
