@@ -1,50 +1,78 @@
-import dlib
-from PIL import Image, ImageDraw, ImageFont
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 import argparse
-
 import cv2
-
-from imutils.video import VideoStream
-from imutils import face_utils, translate, rotate, resize
-
+import dlib
+import gizeh as gz
+import imutils
+import logging
 import numpy as np
 
-vs = VideoStream().start()
+from PIL import Image, ImageDraw, ImageFont
+from imutils import face_utils, translate, rotate
+from imutils.video import VideoStream
+
+logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+
+parser = argparse.ArgumentParser(description="live deal-with-it generator",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+parser.add_argument("--src", type=int, default=0,
+        help="select video source to use")
+parser.add_argument("--max-width", type=int, default=500,
+        help="maximum frame width -- faster processing")
+parser.add_argument('--fullscreen', action='store_true',
+        help="use fullscreen mode")
+
+args, uargs = parser.parse_known_args()
+
+logging.info("Using video from source #%d.", args.src)
+
+vs = VideoStream(src=args.src)
+fps = vs.stream.stream.get(cv2.CAP_PROP_FPS) # need this for animating proper duration
 
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor('shape_predictor_68.dat')
 
-max_width = 500
-frame = vs.read()
-frame = resize(frame, width=max_width)
-
-fps = vs.stream.get(cv2.CAP_PROP_FPS) # need this for animating proper duration
 
 animation_length = fps * 5
 current_animation = 0
 glasses_on = fps * 3
 
-# uncomment for fullscreen, remember 'q' to quit
-# cv2.namedWindow('deal generator', cv2.WND_PROP_FULLSCREEN)
-#cv2.setWindowProperty('deal generator', cv2.WND_PROP_FULLSCREEN,
-#                          cv2.WINDOW_FULLSCREEN)
-
 deal = Image.open("deals.png")
-text = Image.open('text.png')
+text = None
 
 dealing = False
 
+if args.fullscreen:
+    logging.info("Creating full screen window.")
+    cv2.namedWindow('deal generator', cv2.WND_PROP_FULLSCREEN)
+    cv2.setWindowProperty('deal generator', cv2.WND_PROP_FULLSCREEN,
+            cv2.WINDOW_FULLSCREEN)
+else:
+    cv2.namedWindow('deal generator', cv2.WINDOW_NORMAL)
+
+frameno = -1
+vs.start()
 while True:
+    frameno += 1
     frame = vs.read()
-
-    frame = resize(frame, width=max_width)
-
+    frame = imutils.resize(frame, width=args.max_width)
+    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     img_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    rects = detector(img_gray, 0)
     faces = []
 
-    rects = detector(img_gray, 0)
-    img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    # text doesn't change, just initialize it once
+    if text is None:
+        gzs = gz.Surface(*img.size, bg_color=None)
+        gztext = gz.text('DEAL WITH IT', fontfamily="Impact",
+            fontsize=50, fontweight='bold',
+            xy=(img.size[0] // 2, int(img.size[1] * 0.9)),
+            fill=(1, 1, 1), stroke=(0, 0, 0), stroke_width=2)
+        gztext.draw(gzs)
+        text = Image.fromarray(gzs.get_npimage(transparent=True))
 
+    logging.info("%d faces found in frame #%d", len(rects), frameno)
     for rect in rects:
         face = {}
         shades_width = rect.right() - rect.left()
@@ -61,7 +89,7 @@ while True:
         leftEyeCenter = leftEye.mean(axis=0).astype("int")
         rightEyeCenter = rightEye.mean(axis=0).astype("int")
 
-	    # compute the angle between the eye centroids
+        # compute the angle between the eye centroids
         dY = leftEyeCenter[1] - rightEyeCenter[1] 
         dX = leftEyeCenter[0] - rightEyeCenter[0]
         angle = np.rad2deg(np.arctan2(dY, dX)) 
@@ -84,7 +112,7 @@ while True:
                 img.paste(current_deal, (left_eye_x, current_y), current_deal)
             else:
                 img.paste(current_deal, (left_eye_x, left_eye_y), current_deal)
-                img.paste(text, (75, img.height // 2 - 32), text)
+                img.paste(text, (0, 0), text)
 
     if dealing:
         current_animation += 1
@@ -106,3 +134,5 @@ while True:
 
 cv2.destroyAllWindows()
 vs.stop()
+
+# vim: expandtab:ts=4:sts=4:sw=4:
