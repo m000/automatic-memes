@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import argparse
 import dlib
+import gizeh as gz
 import logging
 import moviepy.editor as mpy
 import numpy as np
@@ -79,7 +80,7 @@ class DealGifFace:
 
 
 class DealGif:
-    def __init__(self, bgr, duration, fps, max_width=500):
+    def __init__(self, bgr, text, duration, fps, max_width=500):
         self.bgrpath = Path(bgr)
         self.gifpath = self.bgrpath.with_name('%s-deal'
                 % (self.bgrpath.stem)).with_suffix('.gif')
@@ -100,7 +101,11 @@ class DealGif:
         self.faces = []
 
         self.swag = None
-        self.text = None
+        self.text = text
+        self.gztext = gz.text(self.text, fontfamily='Impact',
+                fontsize=50, fontweight='bold',
+                xy=(self.bgr.size[0] // 2, int(self.bgr.size[1] * 0.9)),
+                fill=(1, 1, 1), stroke=(0, 0, 0), stroke_width=2)
 
     def make_faces(self):
         self.faces = [DealGifFace(self, r) for r in detector(self.bgr_gray, 0)]
@@ -120,7 +125,6 @@ class DealGif:
             # moving swag
             for face in self.faces:
                 current_x = face.swag_pos[0]
-                #current_y = int(face.swag_pos[1] * n / (self.duration - 2))
                 current_y = int(face.swag_pos[1] * (t - t_swag_start) / (t_swag_end - t_swag_start))
                 #logging.info((t, current_x, current_y))
                 frame.paste(face.swag, (current_x, current_y), face.swag)
@@ -128,9 +132,12 @@ class DealGif:
             # stable swag + text
             for face in self.faces:
                 frame.paste(face.swag, face.swag_pos, face.swag)
-                text_x = (frame.width - self.text.width) // 2
-                text_y = frame.height - int(self.text.height * 1.1)
-                frame.paste(self.text, (text_x, text_y), self.text)
+
+                gzs = gz.Surface(*self.bgr.size, bg_color=None)
+                self.gztext.draw(gzs)
+                gzs_image = Image.fromarray(gzs.get_npimage(transparent=True))
+                frame.paste(gzs_image, (0, 0), gzs_image)
+                gzs_image.close()
 
         return np.asarray(frame)
 
@@ -140,8 +147,8 @@ if __name__ == '__main__':
             formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument("--swag-img", default="deals.png",
             help="deal-with-it swag image")
-    parser.add_argument("--text-img", default="text.png",
-            help="deal-with-it text image")
+    parser.add_argument("--text", default="DEAL WITH IT",
+            help="set an alternative deal-with-it text")
     parser.add_argument("--max-width", type=int, default=500,
             help="maximum width for output -- keep gif size small")
     parser.add_argument("--duration", type=int, default=4,
@@ -151,13 +158,11 @@ if __name__ == '__main__':
     args, uargs = parser.parse_known_args()
 
     swag_img = Image.open(args.swag_img)
-    text_img = Image.open(args.text_img)
 
     for ua in uargs:
         try:
-            deal_gif = DealGif(ua, args.duration, args.fps, max_width=args.max_width)
+            deal_gif = DealGif(ua, args.text, args.duration, args.fps, max_width=args.max_width)
             deal_gif.swag = swag_img
-            deal_gif.text = text_img
             deal_gif.make_faces()
         except FileNotFoundError:
             logging.warning("skipping %s -- not a file", ua)
