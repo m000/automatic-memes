@@ -29,7 +29,7 @@ class DealGifFace:
         # extract facial features
         # see: https://www.pyimagesearch.com/2017/04/03/facial-landmarks-dlib-opencv-python/
         self.features = face_utils.shape_to_np(
-                predictor(self.dealgif.img_gray, self.rect))
+                predictor(self.dealgif.bgr_gray, self.rect))
 
         # initialize swag
         self.set_swag()
@@ -79,22 +79,22 @@ class DealGifFace:
 
 
 class DealGif:
-    def __init__(self, im, duration, fps, max_width=500):
-        self.imgpath = Path(im)
-        self.gifpath = self.imgpath.with_name('%s-deal'
-                % (self.imgpath.stem)).with_suffix('.gif')
-        self.img = Image.open(self.imgpath.as_posix()).convert('RGBA')
+    def __init__(self, bgr, duration, fps, max_width=500):
+        self.bgrpath = Path(bgr)
+        self.gifpath = self.bgrpath.with_name('%s-deal'
+                % (self.bgrpath.stem)).with_suffix('.gif')
+        self.bgr = Image.open(self.bgrpath.as_posix()).convert('RGBA')
         self.duration = duration
         self.fps = fps
 
         # scale if needed
-        if max_width > 0 and self.img.size[0] > max_width:
+        if max_width > 0 and self.bgr.size[0] > max_width:
             thumbw = max_width
-            thumbh = (thumbw * self.img.size[1]) // self.img.size[0]
-            self.img.thumbnail((thumbw, thumbh), Image.ANTIALIAS)
+            thumbh = (thumbw * self.bgr.size[1]) // self.bgr.size[0]
+            self.bgr.thumbnail((thumbw, thumbh), Image.ANTIALIAS)
 
         # convert to gray for dlib face detector
-        self.img_gray = np.array(self.img.convert('L'))
+        self.bgr_gray = np.array(self.bgr.convert('L'))
 
         # initialize faces array
         self.faces = []
@@ -103,12 +103,12 @@ class DealGif:
         self.text = None
 
     def make_faces(self):
-        self.faces = [DealGifFace(self, r) for r in detector(self.img_gray, 0)]
+        self.faces = [DealGifFace(self, r) for r in detector(self.bgr_gray, 0)]
         if not self.faces:
-            raise NoFacesDetectedError(self.imgpath)
+            raise NoFacesDetectedError(self.bgrpath)
 
     def make_frame(self, t):
-        img = self.img.convert('RGBA')
+        frame = self.bgr.convert('RGBA')
 
         t_swag_start = 0.10 * self.duration
         t_swag_end = 0.75 * self.duration
@@ -123,16 +123,16 @@ class DealGif:
                 #current_y = int(face.swag_pos[1] * n / (self.duration - 2))
                 current_y = int(face.swag_pos[1] * (t - t_swag_start) / (t_swag_end - t_swag_start))
                 #logging.info((t, current_x, current_y))
-                img.paste(face.swag, (current_x, current_y), face.swag)
+                frame.paste(face.swag, (current_x, current_y), face.swag)
         else:
             # stable swag + text
             for face in self.faces:
-                img.paste(face.swag, face.swag_pos, face.swag)
-                text_x = (img.width - self.text.width) // 2
-                text_y = img.height - int(self.text.height * 1.1)
-                img.paste(self.text, (text_x, text_y), self.text)
+                frame.paste(face.swag, face.swag_pos, face.swag)
+                text_x = (frame.width - self.text.width) // 2
+                text_y = frame.height - int(self.text.height * 1.1)
+                frame.paste(self.text, (text_x, text_y), self.text)
 
-        return np.asarray(img)
+        return np.asarray(frame)
 
 
 if __name__ == '__main__':
@@ -170,7 +170,7 @@ if __name__ == '__main__':
             continue
 
         logging.info("processing %s -- %d face(s) found",
-                deal_gif.imgpath, len(deal_gif.faces))
+                deal_gif.bgrpath, len(deal_gif.faces))
 
         animation = mpy.VideoClip(deal_gif.make_frame, duration=args.duration)
         animation.write_gif(deal_gif.gifpath, fps=args.fps)
