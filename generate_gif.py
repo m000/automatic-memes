@@ -81,13 +81,16 @@ class DealGifFace:
 
 class DealGif:
     TEXT_DT = 1
-    def __init__(self, bgr, duration, fps, max_width=500, suffix='.gif',
+    END_DT = 2.5
+    def __init__(self, bgr, duration=4, fps=4, max_width=500,
+            suffix='.gif', keep_faces=[],
             text_top=None, text_bottom=None, font_size=50):
         self.bgrpath = Path(bgr)
         self.bgr = Image.open(self.bgrpath.as_posix()).convert('RGBA')
         self.duration = duration
         self.fps = fps
         self.suffix = suffix
+        self.keep_faces = keep_faces
         self.font_size = font_size
 
         # scale if needed
@@ -130,9 +133,17 @@ class DealGif:
                 fill=(1, 1, 1), stroke=(0, 0, 0), stroke_width=2)
 
     def make_faces(self):
-        self.faces = [DealGifFace(self, r) for r in detector(self.bgr_gray, 0)]
-        if not self.faces:
+        # detect bounding rectangles for faces and sort them left to right, top to bottom.
+        face_rects = sorted(detector(self.bgr_gray, 0), key=lambda r: (r.left(), r.top()))
+
+        if not face_rects:
             raise NoFacesDetectedError(self.bgrpath)
+
+        # create face objects, keeping only the filtered faces
+        if self.keep_faces == []:
+            self.faces = [DealGifFace(self, r) for r in face_rects]
+        else:
+            self.faces = [DealGifFace(self, face_rects[i-1]) for i in self.keep_faces]
 
     def make_frame(self, t):
         # Make an RGB copy of the background image to work with.
@@ -176,9 +187,8 @@ class DealGif:
         # increase duration to show ending text or pause to final frame
         duration = self.duration
         if len(self.gztext) > 0:
-            duration += DealGif.TEXT_DT*len(self.gztext) + 1
-        else:
-            duration += 2
+            duration += DealGif.TEXT_DT*len(self.gztext)
+        duration += DealGif.END_DT
         self.gztext_i = 0
         self.animation = mpy.VideoClip(self.make_frame, duration=duration)
 
@@ -211,13 +221,18 @@ if __name__ == '__main__':
             help="font size for text")
     parser.add_argument("--suffix", default='.gif',
             help="set the output file type")
+    parser.add_argument('--keep-faces', nargs='+', type=int,
+            default=[], metavar='FIDX',
+            help='Keep only the faces with the specified indexes.')
+
     args, uargs = parser.parse_known_args()
 
     swag_img = Image.open(args.swag_img)
 
     for ua in uargs:
         try:
-            deal_gif = DealGif(ua, max_width=args.max_width, font_size=args.font_pt,
+            deal_gif = DealGif(ua, max_width=args.max_width,
+                    keep_faces=args.keep_faces, font_size=args.font_pt,
                     text_top = args.text_top, text_bottom = args.text_bottom,
                     duration=args.duration, fps=args.fps, suffix=args.suffix)
             deal_gif.swag = swag_img
