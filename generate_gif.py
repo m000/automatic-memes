@@ -22,9 +22,10 @@ class NoFacesDetectedError(Exception):
     pass
 
 class DealGifFace:
-    def __init__(self, dealgif, rect):
+    def __init__(self, dealgif, rect, no_rotate=False):
         self.dealgif = dealgif
         self.rect = rect
+        self.no_rotate = no_rotate
         logging.debug("face-rect: %s" % ((self.top_left, self.bottom_right),))
 
         # extract facial features
@@ -48,7 +49,8 @@ class DealGifFace:
         sh = (self.width * swagimg.size[1]) // swagimg.size[0]
         self.swag = swagimg.resize((sw, sh), resample=Image.LANCZOS)
         self.swag=self.swag.transpose(Image.FLIP_LEFT_RIGHT)
-        #self.swag=self.swag.rotate(self.eyes_angle(), expand=True)
+        if not self.no_rotate:
+            self.swag=self.swag.rotate(self.eyes_angle(), expand=True)
 
         # shift swag to the leftmost position of the left eye
         left_eye_x = self.left_eye[0,0] - int(self.width / 4.5)
@@ -60,7 +62,7 @@ class DealGifFace:
         right_eye_c = self.left_eye.mean(axis=0).astype('int')
         dy = left_eye_c[1] - right_eye_c[1]
         dx = left_eye_c[0] - right_eye_c[0]
-        return np.rad2deg(np.arctan2(dy, dx))
+        return -np.rad2deg(np.arctan2(dy, dx))
 
     @property
     def left_eye(self):
@@ -83,7 +85,7 @@ class DealGif:
     TEXT_DT = 1
     END_DT = 2.5
     def __init__(self, bgr, duration=4, fps=4, max_width=500,
-            suffix='.gif', keep_faces=[],
+            suffix='.gif', keep_faces=[], no_rotate=False,
             text_top=None, text_bottom=None, font_size=50):
         self.bgrpath = Path(bgr)
         self.bgr = Image.open(self.bgrpath.as_posix()).convert('RGBA')
@@ -91,6 +93,7 @@ class DealGif:
         self.fps = fps
         self.suffix = suffix
         self.keep_faces = keep_faces
+        self.no_rotate = no_rotate
         self.font_size = font_size
 
         # scale if needed
@@ -141,9 +144,9 @@ class DealGif:
 
         # create face objects, keeping only the filtered faces
         if self.keep_faces == []:
-            self.faces = [DealGifFace(self, r) for r in face_rects]
+            self.faces = [DealGifFace(self, r, self.no_rotate) for r in face_rects]
         else:
-            self.faces = [DealGifFace(self, face_rects[i-1]) for i in self.keep_faces]
+            self.faces = [DealGifFace(self, face_rects[i-1], self.no_rotate) for i in self.keep_faces]
 
     def make_frame(self, t):
         # Make an RGB copy of the background image to work with.
@@ -221,18 +224,21 @@ if __name__ == '__main__':
             help="font size for text")
     parser.add_argument("--suffix", default='.gif',
             help="set the output file type")
+    parser.add_argument('--no-rotate', action='store_true',
+            help="Don't rotate the swag image.")
     parser.add_argument('--keep-faces', nargs='+', type=int,
             default=[], metavar='FIDX',
-            help='Keep only the faces with the specified indexes.')
+            help="Keep only the faces with the specified indexes.")
 
     args, uargs = parser.parse_known_args()
 
     swag_img = Image.open(args.swag_img)
-
+    print(args)
     for ua in uargs:
         try:
-            deal_gif = DealGif(ua, max_width=args.max_width,
-                    keep_faces=args.keep_faces, font_size=args.font_pt,
+            deal_gif = DealGif(ua,
+                    max_width=args.max_width, font_size=args.font_pt,
+                    keep_faces=args.keep_faces, no_rotate=args.no_rotate,
                     text_top = args.text_top, text_bottom = args.text_bottom,
                     duration=args.duration, fps=args.fps, suffix=args.suffix)
             deal_gif.swag = swag_img
